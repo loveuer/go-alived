@@ -1,0 +1,14 @@
+global:
+  router_id: "node1"
+
+vrrp_instances:
+  - name: "VI_1"
+    interface: "eth0"
+    state: "BACKUP"
+    virtual_router_id: 51
+    priority: 100
+    advert_interval: 1
+    auth_type: "PASS"
+    auth_pass: "secret123"
+    virtual_ips:
+      - "192.168.1.100/24"

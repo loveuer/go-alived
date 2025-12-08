@@ -1,0 +1,65 @@
+global:
+  router_id: "node1"
+  notification_email: "admin@example.com"
+
+vrrp_instances:
+  - name: "VI_1"
+    interface: "eth0"
+    state: "BACKUP"
+    virtual_router_id: 51
+    priority: 100
+    advert_interval: 1
+    auth_type: "PASS"
+    auth_pass: "secret123"
+    virtual_ips:
+      - "192.168.1.100/24"
+      - "192.168.1.101/24"
+    notify_master: "/etc/go-alived/scripts/notify_master.sh"
+    notify_backup: "/etc/go-alived/scripts/notify_backup.sh"
+    notify_fault: "/etc/go-alived/scripts/notify_fault.sh"
+    track_scripts:
+      - "check_nginx"
+
+health_checkers:
+  - name: "check_nginx"
+    type: "tcp"
+    interval: 3s
+    timeout: 2s
+    rise: 3
+    fall: 2
+    config:
+      host: "127.0.0.1"
+      port: 80
+
+  - name: "check_web"
+    type: "http"
+    interval: 5s
+    timeout: 3s
+    rise: 2
+    fall: 3
+    config:
+      url: "http://127.0.0.1:80/health"
+      expected_status: 200
+      method: "GET"
+      insecure_skip_verify: false
+
+  - name: "check_ping"
+    type: "ping"
+    interval: 2s
+    timeout: 1s
+    rise: 2
+    fall: 2
+    config:
+      host: "8.8.8.8"
+      count: 1
+
+  - name: "check_service"
+    type: "script"
+    interval: 10s
+    timeout: 5s
+    rise: 1
+    fall: 1
+    config:
+      script: "/usr/local/bin/check_service.sh"
+      args:
+        - "nginx"

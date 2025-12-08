@@ -1,0 +1,6 @@
+.qoder
+.vscode
+.idea
+
+dist
+x-*

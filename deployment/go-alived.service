@@ -1,0 +1,38 @@
+[Unit]
+Description=Go-Alived - VRRP High Availability Service
+Documentation=https://github.com/loveuer/go-alived
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+ExecStart=/usr/local/bin/go-alived --config /etc/go-alived/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=go-alived
+
+# Security settings
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/go-alived
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=512
+
+# Capabilities required for VRRP operations
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
