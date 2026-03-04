@@ -8,6 +8,7 @@ import (
 	"github.com/loveuer/go-alived/pkg/logger"
 )
 
+// Monitor runs periodic health checks and tracks state.
 type Monitor struct {
 	checker   Checker
 	config    *CheckerConfig
@@ -21,6 +22,7 @@ type Monitor struct {
 	mu      sync.RWMutex
 }
 
+// NewMonitor creates a new Monitor for the given checker.
 func NewMonitor(checker Checker, config *CheckerConfig, log *logger.Logger) *Monitor {
 	return &Monitor{
 		checker: checker,
@@ -35,6 +37,7 @@ func NewMonitor(checker Checker, config *CheckerConfig, log *logger.Logger) *Mon
 	}
 }
 
+// Start begins the health check loop.
 func (m *Monitor) Start() {
 	m.mu.Lock()
 	if m.running {
@@ -51,6 +54,7 @@ func (m *Monitor) Start() {
 	go m.checkLoop()
 }
 
+// Stop stops the health check loop.
 func (m *Monitor) Stop() {
 	m.mu.Lock()
 	if !m.running {
@@ -71,6 +75,7 @@ func (m *Monitor) checkLoop() {
 	ticker := time.NewTicker(m.config.Interval)
 	defer ticker.Stop()
 
+	// Perform initial check immediately
 	m.performCheck()
 
 	for {
@@ -95,7 +100,8 @@ func (m *Monitor) performCheck() {
 	oldHealthy := m.state.Healthy
 	stateChanged := m.state.Update(result, m.config.Rise, m.config.Fall)
 	newHealthy := m.state.Healthy
-	callbacks := m.callbacks
+	callbacks := make([]StateChangeCallback, len(m.callbacks))
+	copy(callbacks, m.callbacks)
 	m.mu.Unlock()
 
 	m.log.Debug("[HealthCheck:%s] check completed: result=%s, duration=%s, healthy=%v",
@@ -111,12 +117,14 @@ func (m *Monitor) performCheck() {
 	}
 }
 
+// OnStateChange registers a callback for health state changes.
 func (m *Monitor) OnStateChange(callback StateChangeCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.callbacks = append(m.callbacks, callback)
 }
 
+// GetState returns a copy of the current checker state.
 func (m *Monitor) GetState() *CheckerState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -125,68 +133,9 @@ func (m *Monitor) GetState() *CheckerState {
 	return &stateCopy
 }
 
+// IsHealthy returns whether the checker is currently healthy.
 func (m *Monitor) IsHealthy() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.state.Healthy
-}
-
-type Manager struct {
-	monitors map[string]*Monitor
-	mu       sync.RWMutex
-	log      *logger.Logger
-}
-
-func NewManager(log *logger.Logger) *Manager {
-	return &Manager{
-		monitors: make(map[string]*Monitor),
-		log:      log,
-	}
-}
-
-func (m *Manager) AddMonitor(monitor *Monitor) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.monitors[monitor.config.Name] = monitor
-}
-
-func (m *Manager) GetMonitor(name string) (*Monitor, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	monitor, ok := m.monitors[name]
-	return monitor, ok
-}
-
-func (m *Manager) StartAll() {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, monitor := range m.monitors {
-		monitor.Start()
-	}
-
-	m.log.Info("started %d health check monitor(s)", len(m.monitors))
-}
-
-func (m *Manager) StopAll() {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, monitor := range m.monitors {
-		monitor.Stop()
-	}
-
-	m.log.Info("stopped all health check monitors")
-}
-
-func (m *Manager) GetAllStates() map[string]*CheckerState {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	states := make(map[string]*CheckerState)
-	for name, monitor := range m.monitors {
-		states[name] = monitor.GetState()
-	}
-
-	return states
 }

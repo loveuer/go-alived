@@ -367,7 +367,7 @@ func (t *EnvironmentTest) TestCloudEnvironment() {
 		if err == nil {
 			cloudDetected = true
 			t.AddResult("云环境", !test.isFatal, fmt.Sprintf("检测到%s环境", test.name), test.isFatal)
-			t.log.Warn(test.solution)
+			t.log.Warn("%s", test.solution)
 		}
 	}
 

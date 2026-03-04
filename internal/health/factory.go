@@ -8,9 +8,13 @@ import (
 )
 
 func CreateChecker(cfg *config.HealthChecker) (Checker, error) {
+	if cfg.Config == nil {
+		return nil, fmt.Errorf("missing config for checker %s", cfg.Name)
+	}
+
 	configMap, ok := cfg.Config.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid config for checker %s", cfg.Name)
+		return nil, fmt.Errorf("invalid config type for checker %s: expected map[string]interface{}", cfg.Name)
 	}
 
 	switch cfg.Type {
@@ -36,6 +40,7 @@ func LoadFromConfig(cfg *config.Config, log *logger.Logger) (*Manager, error) {
 			return nil, fmt.Errorf("failed to create checker %s: %w", healthCfg.Name, err)
 		}
 
+		configMap, _ := healthCfg.Config.(map[string]interface{})
 		monitorCfg := &CheckerConfig{
 			Name:     healthCfg.Name,
 			Type:     healthCfg.Type,
@@ -43,7 +48,7 @@ func LoadFromConfig(cfg *config.Config, log *logger.Logger) (*Manager, error) {
 			Timeout:  healthCfg.Timeout,
 			Rise:     healthCfg.Rise,
 			Fall:     healthCfg.Fall,
-			Config:   healthCfg.Config.(map[string]interface{}),
+			Config:   configMap,
 		}
 
 		monitor := NewMonitor(checker, monitorCfg, log)

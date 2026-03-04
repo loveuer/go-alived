@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"syscall"
+	"time"
 
 	"golang.org/x/net/ipv4"
 )
@@ -14,10 +15,11 @@ const (
 )
 
 type Socket struct {
-	conn     *ipv4.RawConn
-	iface    *net.Interface
-	localIP  net.IP
-	groupIP  net.IP
+	conn       *ipv4.RawConn
+	packetConn net.PacketConn
+	iface      *net.Interface
+	localIP    net.IP
+	groupIP    net.IP
 }
 
 func NewSocket(ifaceName string) (*Socket, error) {
@@ -56,9 +58,8 @@ func NewSocket(ifaceName string) (*Socket, error) {
 	}
 
 	file := os.NewFile(uintptr(fd), "vrrp-socket")
-	defer file.Close()
-
 	packetConn, err := net.FilePacketConn(file)
+	file.Close()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create packet connection: %w", err)
 	}
@@ -86,10 +87,11 @@ func NewSocket(ifaceName string) (*Socket, error) {
 	}
 
 	return &Socket{
-		conn:    rawConn,
-		iface:   iface,
-		localIP: localIP,
-		groupIP: groupIP,
+		conn:       rawConn,
+		packetConn: packetConn,
+		iface:      iface,
+		localIP:    localIP,
+		groupIP:    groupIP,
 	}, nil
 }
 
@@ -131,6 +133,10 @@ func (s *Socket) Receive() (*VRRPPacket, net.IP, error) {
 	}
 
 	return pkt, header.Src, nil
+}
+
+func (s *Socket) SetReadDeadline(t time.Time) error {
+	return s.packetConn.SetReadDeadline(t)
 }
 
 func (s *Socket) Close() error {

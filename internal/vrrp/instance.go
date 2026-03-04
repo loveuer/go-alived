@@ -17,6 +17,7 @@ type Instance struct {
 	AdvertInterval  uint8
 	Interface       string
 	VirtualIPs      []net.IP
+	VirtualIPCIDRs  []string // preserve original CIDR notation
 	AuthType        uint8
 	AuthPass        string
 	TrackScripts    []string
@@ -64,12 +65,14 @@ func NewInstance(
 	}
 
 	virtualIPs := make([]net.IP, 0, len(vips))
+	virtualIPCIDRs := make([]string, 0, len(vips))
 	for _, vip := range vips {
 		ip, _, err := net.ParseCIDR(vip)
 		if err != nil {
 			return nil, fmt.Errorf("invalid VIP %s: %w", vip, err)
 		}
 		virtualIPs = append(virtualIPs, ip)
+		virtualIPCIDRs = append(virtualIPCIDRs, vip)
 	}
 
 	var authTypeNum uint8
@@ -94,6 +97,7 @@ func NewInstance(
 		AdvertInterval:  advertInt,
 		Interface:       iface,
 		VirtualIPs:      virtualIPs,
+		VirtualIPCIDRs:  virtualIPCIDRs,
 		AuthType:        authTypeNum,
 		AuthPass:        authPass,
 		TrackScripts:    trackScripts,
@@ -192,8 +196,15 @@ func (inst *Instance) receiveLoop() {
 		default:
 		}
 
+		// Set read deadline to allow periodic check of stop channel
+		inst.socket.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+
 		pkt, srcIP, err := inst.socket.Receive()
 		if err != nil {
+			// Check if it's a timeout error, which is expected
+			if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+				continue
+			}
 			inst.log.Debug("[%s] failed to receive packet: %v", inst.Name, err)
 			continue
 		}
@@ -371,11 +382,7 @@ func (inst *Instance) removeVIPs() error {
 }
 
 func (inst *Instance) getVIPsWithCIDR() []string {
-	result := make([]string, len(inst.VirtualIPs))
-	for i, ip := range inst.VirtualIPs {
-		result[i] = ip.String() + "/32"
-	}
-	return result
+	return inst.VirtualIPCIDRs
 }
 
 func (inst *Instance) GetState() State {
@@ -399,15 +406,17 @@ func (inst *Instance) AdjustPriority(delta int) {
 	defer inst.mu.Unlock()
 
 	oldPriority := inst.priorityCalc.GetPriority()
-	
+
 	if delta < 0 {
 		inst.priorityCalc.DecreasePriority(uint8(-delta))
+	} else if delta > 0 {
+		inst.priorityCalc.IncreasePriority(uint8(delta))
 	}
-	
+
 	newPriority := inst.priorityCalc.GetPriority()
-	
+
 	if oldPriority != newPriority {
-		inst.log.Info("[%s] priority adjusted: %d -> %d (delta=%d)", 
+		inst.log.Info("[%s] priority adjusted: %d -> %d (delta=%d)",
 			inst.Name, oldPriority, newPriority, delta)
 	}
 }
