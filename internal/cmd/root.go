@@ -11,7 +11,7 @@ var rootCmd = &cobra.Command{
 	Short: "Go-Alived - VRRP High Availability Service",
 	Long: `go-alived is a lightweight, dependency-free VRRP implementation in Go.
 It provides high availability for IP addresses with health checking support.`,
-	Version: "1.0.0",
+	Version: "1.2.0",
 }
 
 func Execute() {
