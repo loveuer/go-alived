@@ -7,7 +7,7 @@ import (
 )
 
 // Version can be set at build time via ldflags
-var Version = "1.2.1"
+var Version = "1.3.0"
 
 var rootCmd = &cobra.Command{
 	Use:   "go-alived",

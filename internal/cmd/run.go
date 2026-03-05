@@ -58,6 +58,7 @@ func runService(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	setupNotifyScripts(vrrpMgr, cfg, log)
 	setupHealthTracking(vrrpMgr, healthMgr, log)
 
 	healthMgr.StartAll()
@@ -98,6 +99,27 @@ func cleanup(log *logger.Logger, vrrpMgr *vrrp.Manager, healthMgr *health.Manage
 	log.Info("cleaning up resources...")
 	healthMgr.StopAll()
 	vrrpMgr.StopAll()
+}
+
+func setupNotifyScripts(vrrpMgr *vrrp.Manager, cfg *config.Config, log *logger.Logger) {
+	for _, vrrpCfg := range cfg.VRRP {
+		if vrrpCfg.NotifyMaster == "" && vrrpCfg.NotifyBackup == "" && vrrpCfg.NotifyFault == "" {
+			continue
+		}
+
+		inst, ok := vrrpMgr.GetInstance(vrrpCfg.Name)
+		if !ok {
+			continue
+		}
+
+		vrrp.SetupNotify(inst, &vrrp.NotifyConfig{
+			Name:         vrrpCfg.Name,
+			NotifyMaster: vrrpCfg.NotifyMaster,
+			NotifyBackup: vrrpCfg.NotifyBackup,
+			NotifyFault:  vrrpCfg.NotifyFault,
+			Log:          log,
+		})
+	}
 }
 
 func setupHealthTracking(vrrpMgr *vrrp.Manager, healthMgr *health.Manager, log *logger.Logger) {
