@@ -1,40 +1,35 @@
 # go-alived
 
-A lightweight, dependency-free VRRP (Virtual Router Redundancy Protocol) implementation in Go, designed as a simple alternative to keepalived.
+A lightweight VRRP (Virtual Router Redundancy Protocol) implementation in Go, designed as a simple alternative to keepalived.
 
 ## Features
 
-✅ **Phase 1: Core VRRP Functionality (Completed)**
-- VRRP protocol implementation (RFC 3768/5798)
-- Virtual IP management (add/remove VIPs)
-- State machine (INIT/BACKUP/MASTER/FAULT)
-- Priority-based master election
-- Gratuitous ARP for network updates
-- Raw socket VRRP packet send/receive
-- Timer management (advertisement & master-down timers)
-- VRRP instance manager with multi-instance support
-- Configuration hot-reload (SIGHUP)
-
-✅ **Phase 2: Health Checking (Completed)**
-- Health checker interface with rise/fall logic
-- TCP health checks
-- HTTP/HTTPS health checks
-- ICMP ping checks
-- Script-based checks (custom commands)
-- Periodic health check scheduling
-- Health check integration with VRRP priority
-- Track scripts: automatic priority adjustment on health changes
-
-🚧 **Phase 3: Enhanced Features (Planned)**
-- State transition scripts (notify_master/backup/fault)
-- Email/Webhook notifications
-- Sync groups
-- Virtual MAC support
-- Metrics export
+- **VRRP Protocol**: RFC 3768/5798 compliant implementation
+- **High Availability**: Automatic failover with priority-based master election
+- **Health Checking**: TCP, HTTP/HTTPS, ICMP ping, and script-based checks
+- **Easy Deployment**: Built-in install command with systemd/init.d support
+- **Hot Reload**: Configuration reload via SIGHUP without service restart
+- **Zero Dependencies**: Single static binary, no runtime dependencies
 
 ## Installation
 
-### Build from source
+### Download Binary
+
+Download the latest release from [GitHub Releases](https://github.com/loveuer/go-alived/releases):
+
+```bash
+# Linux amd64
+curl -LO https://github.com/loveuer/go-alived/releases/latest/download/go-alived-linux-amd64
+chmod +x go-alived-linux-amd64
+sudo mv go-alived-linux-amd64 /usr/local/bin/go-alived
+
+# Linux arm64
+curl -LO https://github.com/loveuer/go-alived/releases/latest/download/go-alived-linux-arm64
+chmod +x go-alived-linux-arm64
+sudo mv go-alived-linux-arm64 /usr/local/bin/go-alived
+```
+
+### Build from Source
 
 ```bash
 git clone https://github.com/loveuer/go-alived.git
@@ -42,190 +37,246 @@ cd go-alived
 go build -o go-alived .
 ```
 
+### Quick Install (Recommended)
+
+```bash
+# Install as systemd service (default)
+sudo ./go-alived install
+
+# Install as init.d service (for OpenWrt/older systems)
+sudo ./go-alived install --method service
+```
+
 ## Quick Start
 
-### 1. Test Your Environment
-
-Before deployment, test if your environment supports VRRP:
+### 1. Test Environment
 
 ```bash
-# Basic test (auto-detect network interface)
-sudo ./go-alived test
+# Check if your environment supports VRRP
+sudo go-alived test
 
-# Test specific interface
-sudo ./go-alived test -i eth0
-
-# Full test with VIP
-sudo ./go-alived test -i eth0 -v 192.168.1.100/24
+# Test with specific interface
+sudo go-alived test -i eth0
 ```
 
-### 2. Run the Service
+### 2. Configure
+
+Edit `/etc/go-alived/config.yaml`:
+
+```yaml
+global:
+  router_id: "node1"
+
+vrrp_instances:
+  - name: "VI_1"
+    interface: "eth0"          # Network interface
+    state: "BACKUP"            # Initial state
+    virtual_router_id: 51      # VRID (1-255, must match on all nodes)
+    priority: 100              # Higher = more likely to be master
+    advert_interval: 1         # Advertisement interval in seconds
+    auth_type: "PASS"          # Authentication type
+    auth_pass: "secret"        # Password (max 8 chars)
+    virtual_ips:
+      - "192.168.1.100/24"     # Virtual IP address(es)
+```
+
+### 3. Start Service
 
 ```bash
-# Run with minimal config
-sudo ./go-alived run -c config.mini.yaml -d
-
-# Run with full config
-sudo ./go-alived -c config.yaml
-
-# Install as systemd service
-sudo ./deployment/install.sh
+# Systemd
+sudo systemctl daemon-reload
+sudo systemctl enable go-alived
 sudo systemctl start go-alived
+
+# Init.d
+sudo /etc/init.d/go-alived start
 ```
 
-## Usage
+### 4. Verify
 
-### Commands
+```bash
+# Check service status
+sudo systemctl status go-alived
 
+# Check VIP
+ip addr show eth0 | grep 192.168.1.100
+
+# View logs
+sudo journalctl -u go-alived -f
 ```
-go-alived              # Run VRRP service (default)
-go-alived run          # Run VRRP service
-go-alived test         # Test environment for VRRP support
-go-alived --help       # Show help
-go-alived --version    # Show version
-```
-
-### Global Flags
-
-```
--c, --config string    Path to configuration file (default "/etc/go-alived/config.yaml")
--d, --debug            Enable debug mode
--h, --help             Show help
--v, --version          Show version
-```
-
-### Test Command Flags
-
-```
--i, --interface string    Network interface to test (auto-detect if not specified)
--v, --vip string          Test VIP address (e.g., 192.168.1.100/24)
-```
-
-See [USAGE.md](USAGE.md) for detailed usage documentation.
 
 ## Configuration
 
-### Minimal Configuration
+### Two-Node HA Setup Example
 
+**Node 1 (Primary)**:
 ```yaml
-# config.mini.yaml - VRRP only
 global:
   router_id: "node1"
 
 vrrp_instances:
   - name: "VI_1"
     interface: "eth0"
-    state: "BACKUP"
+    state: "MASTER"
     virtual_router_id: 51
-    priority: 100
+    priority: 100              # Higher priority
     advert_interval: 1
     auth_type: "PASS"
-    auth_pass: "secret123"
+    auth_pass: "secret"
     virtual_ips:
       - "192.168.1.100/24"
 ```
 
-### Full Configuration Example
+**Node 2 (Backup)**:
+```yaml
+global:
+  router_id: "node2"
 
-See `config.example.yaml` for complete configuration with health checking.
+vrrp_instances:
+  - name: "VI_1"
+    interface: "eth0"
+    state: "BACKUP"
+    virtual_router_id: 51
+    priority: 90               # Lower priority
+    advert_interval: 1
+    auth_type: "PASS"
+    auth_pass: "secret"        # Must match
+    virtual_ips:
+      - "192.168.1.100/24"     # Must match
+```
 
-### Signals
+### Health Checking
 
-- `SIGHUP`: Reload configuration
-- `SIGINT/SIGTERM`: Graceful shutdown
+```yaml
+vrrp_instances:
+  - name: "VI_1"
+    # ... other settings ...
+    track_scripts:
+      - "check_nginx"          # Reference to health checker
 
-## Architecture
+health_checkers:
+  - name: "check_nginx"
+    type: "tcp"
+    interval: 3s
+    timeout: 2s
+    rise: 3                    # Successes to mark healthy
+    fall: 2                    # Failures to mark unhealthy
+    config:
+      host: "127.0.0.1"
+      port: 80
+```
+
+**Supported Health Check Types**:
+
+| Type | Description | Config |
+|------|-------------|--------|
+| `tcp` | TCP port check | `host`, `port` |
+| `http` | HTTP endpoint check | `url`, `method`, `expected_status` |
+| `ping` | ICMP ping check | `host`, `count` |
+| `script` | Custom script | `script`, `args` |
+
+## Commands
 
 ```
-go-alived/
-├── main.go                 # Application entry point
-├── internal/
-│   ├── cmd/               # Cobra commands
-│   │   ├── root.go        # Root command
-│   │   ├── run.go         # Run service command
-│   │   └── test.go        # Environment test command
-│   ├── vrrp/              # VRRP implementation
-│   │   ├── packet.go      # VRRP packet structure & marshaling
-│   │   ├── socket.go      # Raw socket operations
-│   │   ├── state.go       # State machine & timers
-│   │   ├── arp.go         # Gratuitous ARP
-│   │   ├── instance.go    # VRRP instance logic
-│   │   └── manager.go     # Instance manager
-│   └── health/            # Health check system
-│       ├── checker.go     # Checker interface & state
-│       ├── monitor.go     # Health check scheduler
-│       ├── tcp.go         # TCP health checker
-│       ├── http.go        # HTTP/HTTPS health checker
-│       ├── ping.go        # ICMP ping checker
-│       ├── script.go      # Script checker
-│       └── factory.go     # Checker factory
-├── pkg/
-│   ├── config/            # Configuration loading & validation
-│   ├── logger/            # Logging system
-│   └── netif/             # Network interface management
-└── deployment/            # Deployment files
-    ├── go-alived.service  # Systemd service file
-    ├── install.sh         # Installation script
-    ├── uninstall.sh       # Uninstallation script
-    ├── check-env.sh       # Environment check script
-    ├── README.md          # Deployment documentation
-    └── COMPATIBILITY.md   # Environment compatibility guide
+go-alived [command]
+
+Available Commands:
+  run         Run the VRRP service
+  test        Test environment for VRRP support
+  install     Install go-alived as a system service (alias: i)
+  help        Help about any command
+
+Flags:
+  -h, --help      help for go-alived
+  -v, --version   version for go-alived
+```
+
+### run
+
+```bash
+go-alived run [flags]
+
+Flags:
+  -c, --config string   Path to config file (default "/etc/go-alived/config.yaml")
+  -d, --debug           Enable debug mode
+```
+
+### test
+
+```bash
+go-alived test [flags]
+
+Flags:
+  -i, --interface string   Network interface to test
+  -v, --vip string         Test VIP address (e.g., 192.168.1.100/24)
+```
+
+### install
+
+```bash
+go-alived install [flags]
+
+Flags:
+  -m, --method string   Installation method: systemd, service (default "systemd")
+
+Aliases:
+  install, i
+```
+
+## Signals
+
+| Signal | Action |
+|--------|--------|
+| `SIGHUP` | Reload configuration |
+| `SIGINT` / `SIGTERM` | Graceful shutdown |
+
+```bash
+# Reload configuration
+sudo kill -HUP $(pgrep go-alived)
 ```
 
 ## Environment Compatibility
 
-### ✅ Fully Supported
-- Physical servers
-- KVM/QEMU virtual machines
-- Proxmox VE
-- VMware ESXi (with promiscuous mode)
-- VirtualBox (with bridged network + promiscuous mode)
+| Environment | Support | Notes |
+|-------------|---------|-------|
+| Physical servers | Full | |
+| KVM/QEMU/Proxmox | Full | |
+| VMware ESXi | Full | Enable promiscuous mode |
+| VirtualBox | Full | Bridged network + promiscuous mode |
+| Docker | Limited | Requires `--privileged --net=host` |
+| OpenWrt/iStoreOS | Full | Use `--method service` for install |
+| AWS/Aliyun/Azure | None | Multicast disabled |
 
-### ⚠️ Limited Support
-- Private cloud (depends on network configuration)
-- Docker containers (requires `--privileged` and `--net=host`)
-- Kubernetes (requires hostNetwork mode)
+> **Note**: VRRP requires multicast support (224.0.0.18). Most public clouds disable multicast at the network layer. Use cloud-native HA solutions instead.
 
-### ❌ Not Supported
-- AWS EC2 (multicast disabled)
-- Aliyun ECS (multicast disabled)
-- Azure VM (requires special configuration)
-- Google Cloud (multicast disabled by default)
+## Troubleshooting
 
-**Why?** Public clouds typically disable multicast protocols (224.0.0.18) at the network virtualization layer.
+### Common Issues
 
-**Alternative**: Use cloud-native solutions like Elastic IP (AWS), SLB/HaVip (Aliyun), Load Balancer (Azure/GCP).
+**1. "permission denied" or "operation not permitted"**
+```bash
+# VRRP requires root privileges
+sudo go-alived run -c /etc/go-alived/config.yaml
+```
 
-See [deployment/COMPATIBILITY.md](deployment/COMPATIBILITY.md) for detailed compatibility information.
+**2. "authentication failed"**
+- Ensure `auth_pass` matches on all nodes
+- Password is limited to 8 characters
 
-## Requirements
+**3. Both nodes become MASTER (split-brain)**
+- Check network connectivity between nodes
+- Verify `virtual_router_id` matches
+- Ensure multicast traffic is allowed
 
-- Go 1.21+ (for building)
-- Linux/macOS with root privileges (for raw sockets and interface management)
-- Network interface with IPv4 address
-- Multicast support (for VRRP)
+**4. VIP not pingable after failover**
+- Gratuitous ARP may be blocked
+- Check switch/router ARP cache timeout
 
-## Dependencies
+### Debug Mode
 
-Minimal external dependencies:
-- `github.com/vishvananda/netlink` - Network interface management
-- `github.com/mdlayher/arp` - ARP packet handling
-- `github.com/spf13/cobra` - CLI framework
-- `golang.org/x/net/ipv4` - IPv4 raw socket support
-- `golang.org/x/net/icmp` - ICMP ping support
-- `gopkg.in/yaml.v3` - YAML configuration parsing
-
-## Documentation
-
-- [USAGE.md](USAGE.md) - Detailed usage guide
-- [TESTING.md](TESTING.md) - Testing guide
-- [deployment/README.md](deployment/README.md) - Deployment guide
-- [deployment/COMPATIBILITY.md](deployment/COMPATIBILITY.md) - Environment compatibility
-- [roadmap.md](roadmap.md) - Implementation roadmap
-
-## Roadmap
-
-See [roadmap.md](roadmap.md) for detailed implementation plan.
+```bash
+sudo go-alived run -c /etc/go-alived/config.yaml -d
+```
 
 ## License
 

@@ -16,6 +16,7 @@ const (
 	defaultConfigDir   = "/etc/go-alived"
 	defaultConfigFile  = "/etc/go-alived/config.yaml"
 	systemdServicePath = "/etc/systemd/system/go-alived.service"
+	initdScriptPath    = "/etc/init.d/go-alived"
 )
 
 var (
@@ -30,7 +31,7 @@ var installCmd = &cobra.Command{
 
 Supported installation methods:
   - systemd: Install as a systemd service (default, recommended for modern Linux)
-  - service: Install binary and config only (manual startup)
+  - service: Install as a SysV init.d service (for older Linux distributions)
 
 Examples:
   sudo go-alived install
@@ -65,10 +66,7 @@ func runInstall(cmd *cobra.Command, args []string) {
 	fmt.Println("=== Go-Alived Installation ===")
 	fmt.Println()
 
-	totalSteps := 2
-	if method == "systemd" {
-		totalSteps = 3
-	}
+	const totalSteps = 3
 
 	// Step 1: Copy binary
 	if err := installBinary(1, totalSteps); err != nil {
@@ -83,12 +81,10 @@ func runInstall(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Step 3: Install systemd service if requested
-	if method == "systemd" {
-		if err := installSystemdService(3, totalSteps); err != nil {
-			fmt.Printf("Error installing systemd service: %v\n", err)
-			os.Exit(1)
-		}
+	// Step 3: Install service script
+	if err := installServiceScript(3, totalSteps, method); err != nil {
+		fmt.Printf("Error installing service script: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Print completion message
@@ -165,6 +161,17 @@ func installConfig(step, total int) (bool, error) {
 	return true, nil
 }
 
+func installServiceScript(step, total int, method string) error {
+	switch method {
+	case "systemd":
+		return installSystemdService(step, total)
+	case "service":
+		return installInitdScript(step, total)
+	default:
+		return fmt.Errorf("unsupported method: %s", method)
+	}
+}
+
 func installSystemdService(step, total int) error {
 	fmt.Printf("[%d/%d] Installing systemd service... ", step, total)
 
@@ -175,6 +182,19 @@ func installSystemdService(step, total int) error {
 	}
 
 	fmt.Printf("done (%s)\n", systemdServicePath)
+	return nil
+}
+
+func installInitdScript(step, total int) error {
+	fmt.Printf("[%d/%d] Installing init.d script... ", step, total)
+
+	scriptContent := generateInitdScript()
+
+	if err := os.WriteFile(initdScriptPath, []byte(scriptContent), 0755); err != nil {
+		return fmt.Errorf("failed to write init.d script: %w", err)
+	}
+
+	fmt.Printf("done (%s)\n", initdScriptPath)
 	return nil
 }
 
@@ -261,6 +281,90 @@ WantedBy=multi-user.target
 `
 }
 
+func generateInitdScript() string {
+	return `#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          go-alived
+# Required-Start:    $network $remote_fs $syslog
+# Required-Stop:     $network $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Go-Alived VRRP High Availability Service
+# Description:       Lightweight VRRP implementation for IP high availability
+### END INIT INFO
+
+NAME="go-alived"
+DAEMON="/usr/local/bin/go-alived"
+DAEMON_ARGS="run --config /etc/go-alived/config.yaml"
+PIDFILE="/var/run/${NAME}.pid"
+LOGFILE="/var/log/${NAME}.log"
+
+[ -x "$DAEMON" ] || exit 5
+
+start() {
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "$NAME is already running"
+        return 1
+    fi
+    echo -n "Starting $NAME... "
+    nohup $DAEMON $DAEMON_ARGS >> "$LOGFILE" 2>&1 &
+    echo $! > "$PIDFILE"
+    echo "done (PID: $(cat "$PIDFILE"))"
+}
+
+stop() {
+    if [ ! -f "$PIDFILE" ] || ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "$NAME is not running"
+        return 1
+    fi
+    echo -n "Stopping $NAME... "
+    kill "$(cat "$PIDFILE")"
+    rm -f "$PIDFILE"
+    echo "done"
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+reload() {
+    if [ ! -f "$PIDFILE" ] || ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "$NAME is not running"
+        return 1
+    fi
+    echo -n "Reloading $NAME configuration... "
+    kill -HUP "$(cat "$PIDFILE")"
+    echo "done"
+}
+
+status() {
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        echo "$NAME is running (PID: $(cat "$PIDFILE"))"
+    else
+        echo "$NAME is not running"
+        [ -f "$PIDFILE" ] && rm -f "$PIDFILE"
+        return 1
+    fi
+}
+
+case "$1" in
+    start)   start   ;;
+    stop)    stop    ;;
+    restart) restart ;;
+    reload)  reload  ;;
+    status)  status  ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|reload|status}"
+        exit 2
+        ;;
+esac
+
+exit $?
+`
+}
+
 func detectNetworkInterface() string {
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -299,18 +403,29 @@ func printCompletionMessage(method string, configCreated bool) {
 	fmt.Println("=== Installation Complete ===")
 	fmt.Println()
 
+	// Installed files summary
+	fmt.Println(">>> Installed Files:")
+	fmt.Printf("    Binary:  %s\n", defaultBinaryPath)
+	fmt.Printf("    Config:  %s\n", defaultConfigFile)
+	if method == "systemd" {
+		fmt.Printf("    Service: %s\n", systemdServicePath)
+	} else {
+		fmt.Printf("    Service: %s\n", initdScriptPath)
+	}
+	fmt.Println()
+
 	// What needs to be modified
 	fmt.Println(">>> Configuration Required:")
 	fmt.Printf("    Edit: %s\n", defaultConfigFile)
 	fmt.Println()
-	fmt.Println("    Modify the following settings:")
 	if configCreated {
-		fmt.Println("    - auth_pass: Change 'changeme' to a secure password")
-		fmt.Println("    - virtual_ips: Set your Virtual IP address(es)")
-		fmt.Println("    - interface: Verify the network interface is correct")
-		fmt.Println("    - priority: Adjust based on node role (higher = more likely to be master)")
+		fmt.Println("    Modify the following settings:")
+		fmt.Println("    - auth_pass:    Change 'changeme' to a secure password")
+		fmt.Println("    - virtual_ips:  Set your Virtual IP address(es)")
+		fmt.Println("    - interface:    Verify the network interface is correct")
+		fmt.Println("    - priority:     Adjust based on node role (higher = more likely master)")
 	} else {
-		fmt.Println("    - Review your existing configuration")
+		fmt.Println("    Review your existing configuration")
 	}
 	fmt.Println()
 
@@ -332,11 +447,15 @@ func printCompletionMessage(method string, configCreated bool) {
 		fmt.Println("    1. Edit configuration:")
 		fmt.Printf("       sudo vim %s\n", defaultConfigFile)
 		fmt.Println()
-		fmt.Println("    2. Run manually:")
-		fmt.Printf("       sudo %s run -c %s\n", defaultBinaryPath, defaultConfigFile)
+		fmt.Println("    2. Start service:")
+		fmt.Printf("       sudo %s start\n", initdScriptPath)
 		fmt.Println()
-		fmt.Println("    3. Or run in debug mode:")
-		fmt.Printf("       sudo %s run -c %s -d\n", defaultBinaryPath, defaultConfigFile)
+		fmt.Println("    3. Enable on boot (Debian/Ubuntu):")
+		fmt.Println("       sudo update-rc.d go-alived defaults")
+		fmt.Println()
+		fmt.Println("    4. Check service status:")
+		fmt.Printf("       sudo %s status\n", initdScriptPath)
+		fmt.Printf("       tail -f /var/log/go-alived.log\n")
 	}
 	fmt.Println()
 
