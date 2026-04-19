@@ -7,7 +7,7 @@ A lightweight VRRP (Virtual Router Redundancy Protocol) implementation in Go, de
 - **VRRP Protocol**: RFC 3768/5798 compliant implementation
 - **High Availability**: Automatic failover with priority-based master election
 - **Health Checking**: TCP, HTTP/HTTPS, ICMP ping, and script-based checks
-- **Easy Deployment**: Built-in install command with systemd/init.d support
+- **Easy Deployment**: Built-in install command with systemd/init.d/Docker Compose support
 - **Hot Reload**: Configuration reload via SIGHUP without service restart
 - **Zero Dependencies**: Single static binary, no runtime dependencies
 
@@ -45,6 +45,9 @@ sudo ./go-alived install
 
 # Install as init.d service (for OpenWrt/older systems)
 sudo ./go-alived install --method service
+
+# Generate Docker Compose deployment files
+./go-alived install --method docker
 ```
 
 ## Quick Start
@@ -90,6 +93,9 @@ sudo systemctl start go-alived
 
 # Init.d
 sudo /etc/init.d/go-alived start
+
+# Docker Compose
+docker compose up -d
 ```
 
 ### 4. Verify
@@ -217,7 +223,7 @@ Flags:
 go-alived install [flags]
 
 Flags:
-  -m, --method string   Installation method: systemd, service (default "systemd")
+  -m, --method string   Installation method: systemd, service, docker (default "systemd")
 
 Aliases:
   install, i
@@ -243,7 +249,7 @@ sudo kill -HUP $(pgrep go-alived)
 | KVM/QEMU/Proxmox | Full | |
 | VMware ESXi | Full | Enable promiscuous mode |
 | VirtualBox | Full | Bridged network + promiscuous mode |
-| Docker | Limited | Requires `--privileged --net=host` |
+| Docker | Limited | Use `install --method docker`, requires `--privileged --net=host` |
 | OpenWrt/iStoreOS | Full | Use `--method service` for install |
 | AWS/Aliyun/Azure | None | Multicast disabled |
 

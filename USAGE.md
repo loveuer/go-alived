@@ -229,6 +229,23 @@ sudo journalctl -u go-alived -f
 sudo systemctl enable go-alived
 ```
 
+### 方式 3: Docker Compose
+
+```bash
+# 生成 docker-compose.yaml、config.yaml 和 scripts/
+./go-alived install --method docker
+
+# 编辑配置
+vim config.yaml
+
+# 启动服务
+docker compose up -d
+
+# 查看状态和日志
+docker compose ps
+docker compose logs -f
+```
+
 ## 常见使用场景
 
 ### 场景 1: Web 服务高可用

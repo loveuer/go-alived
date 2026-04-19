@@ -17,6 +17,7 @@ const (
 	defaultConfigFile  = "/etc/go-alived/config.yaml"
 	systemdServicePath = "/etc/systemd/system/go-alived.service"
 	initdScriptPath    = "/etc/init.d/go-alived"
+	defaultDockerImage = "loveuer/go-alived:latest"
 )
 
 var (
@@ -26,17 +27,19 @@ var (
 var installCmd = &cobra.Command{
 	Use:     "install",
 	Aliases: []string{"i"},
-	Short:   "Install go-alived as a system service",
+	Short:   "Install go-alived as a system service or Docker Compose deployment",
 	Long: `Install go-alived binary and configuration files to system paths.
 
 Supported installation methods:
   - systemd: Install as a systemd service (default, recommended for modern Linux)
   - service: Install as a SysV init.d service (for older Linux distributions)
+  - docker: Generate docker-compose.yaml and local configuration files
 
 Examples:
   sudo go-alived install
   sudo go-alived install --method systemd
-  sudo go-alived i -m service`,
+  sudo go-alived i -m service
+  go-alived install --method docker`,
 	Run: runInstall,
 }
 
@@ -44,22 +47,26 @@ func init() {
 	rootCmd.AddCommand(installCmd)
 
 	installCmd.Flags().StringVarP(&installMethod, "method", "m", "systemd",
-		"installation method: systemd, service")
+		"installation method: systemd, service, docker")
 }
 
 func runInstall(cmd *cobra.Command, args []string) {
+	method := strings.ToLower(installMethod)
+	if method != "systemd" && method != "service" && method != "docker" {
+		fmt.Printf("Error: Invalid installation method '%s'\n", installMethod)
+		fmt.Println("Supported methods: systemd, service, docker")
+		os.Exit(1)
+	}
+
+	if method == "docker" {
+		runDockerInstall()
+		return
+	}
+
 	// Check root privileges
 	if os.Geteuid() != 0 {
 		fmt.Println("Error: This command requires root privileges")
 		fmt.Println("Please run with: sudo go-alived install")
-		os.Exit(1)
-	}
-
-	// Validate method
-	method := strings.ToLower(installMethod)
-	if method != "systemd" && method != "service" {
-		fmt.Printf("Error: Invalid installation method '%s'\n", installMethod)
-		fmt.Println("Supported methods: systemd, service")
 		os.Exit(1)
 	}
 
@@ -89,6 +96,41 @@ func runInstall(cmd *cobra.Command, args []string) {
 
 	// Print completion message
 	printCompletionMessage(method, configCreated)
+}
+
+func runDockerInstall() {
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("Error determining current directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	composeFile := filepath.Join(workDir, "docker-compose.yaml")
+	configFile := filepath.Join(workDir, "config.yaml")
+	scriptsDir := filepath.Join(workDir, "scripts")
+
+	fmt.Println("=== Go-Alived Docker Installation ===")
+	fmt.Println()
+
+	const totalSteps = 3
+
+	if err := installDockerScriptsDir(1, totalSteps, scriptsDir); err != nil {
+		fmt.Printf("Error preparing scripts directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	configCreated, err := installDockerConfig(2, totalSteps, configFile)
+	if err != nil {
+		fmt.Printf("Error installing config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := installDockerCompose(3, totalSteps, composeFile); err != nil {
+		fmt.Printf("Error generating docker-compose file: %v\n", err)
+		os.Exit(1)
+	}
+
+	printDockerCompletionMessage(composeFile, configFile, scriptsDir, configCreated)
 }
 
 func installBinary(step, total int) error {
@@ -198,6 +240,46 @@ func installInitdScript(step, total int) error {
 	return nil
 }
 
+func installDockerScriptsDir(step, total int, dir string) error {
+	fmt.Printf("[%d/%d] Preparing scripts directory... ", step, total)
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create scripts directory: %w", err)
+	}
+
+	fmt.Printf("done (%s)\n", dir)
+	return nil
+}
+
+func installDockerConfig(step, total int, configPath string) (bool, error) {
+	fmt.Printf("[%d/%d] Setting up configuration... ", step, total)
+
+	if _, err := os.Stat(configPath); err == nil {
+		fmt.Println("config already exists")
+		return false, nil
+	}
+
+	configContent := generateDefaultConfig()
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		return false, fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	fmt.Printf("done (%s)\n", configPath)
+	return true, nil
+}
+
+func installDockerCompose(step, total int, composePath string) error {
+	fmt.Printf("[%d/%d] Generating docker-compose.yaml... ", step, total)
+
+	composeContent := generateDockerCompose()
+	if err := os.WriteFile(composePath, []byte(composeContent), 0644); err != nil {
+		return fmt.Errorf("failed to write docker-compose file: %w", err)
+	}
+
+	fmt.Printf("done (%s)\n", composePath)
+	return nil
+}
+
 func generateDefaultConfig() string {
 	// Auto-detect network interface
 	iface := detectNetworkInterface()
@@ -279,6 +361,24 @@ CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
 [Install]
 WantedBy=multi-user.target
 `
+}
+
+func generateDockerCompose() string {
+	return fmt.Sprintf(`services:
+  go-alived:
+    image: %s
+    container_name: go-alived
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    volumes:
+      - ./config.yaml:/etc/go-alived/config.yaml:ro
+      - ./scripts:/etc/go-alived/scripts:ro
+    command:
+      - run
+      - --config
+      - /etc/go-alived/config.yaml
+`, defaultDockerImage)
 }
 
 func generateInitdScript() string {
@@ -462,5 +562,49 @@ func printCompletionMessage(method string, configCreated bool) {
 	// Test environment
 	fmt.Println(">>> Test Environment (Optional):")
 	fmt.Printf("    sudo %s test\n", defaultBinaryPath)
+	fmt.Println()
+}
+
+func printDockerCompletionMessage(composeFile, configFile, scriptsDir string, configCreated bool) {
+	fmt.Println()
+	fmt.Println("=== Installation Complete ===")
+	fmt.Println()
+
+	fmt.Println(">>> Generated Files:")
+	fmt.Printf("    Compose: %s\n", composeFile)
+	fmt.Printf("    Config:  %s\n", configFile)
+	fmt.Printf("    Scripts: %s\n", scriptsDir)
+	fmt.Println()
+
+	fmt.Println(">>> Configuration Required:")
+	fmt.Printf("    Edit: %s\n", configFile)
+	fmt.Println()
+	if configCreated {
+		fmt.Println("    Modify the following settings:")
+		fmt.Println("    - auth_pass:    Change 'changeme' to a secure password")
+		fmt.Println("    - virtual_ips:  Set your Virtual IP address(es)")
+		fmt.Println("    - interface:    Verify the network interface is correct")
+		fmt.Println("    - priority:     Adjust based on node role (higher = more likely master)")
+	} else {
+		fmt.Println("    Review your existing configuration")
+	}
+	fmt.Println()
+
+	fmt.Println(">>> Next Steps:")
+	fmt.Println("    1. Edit configuration:")
+	fmt.Printf("       vim %s\n", configFile)
+	fmt.Println()
+	fmt.Println("    2. Start the container:")
+	fmt.Printf("       docker compose -f %s up -d\n", composeFile)
+	fmt.Println()
+	fmt.Println("    3. Check container status and logs:")
+	fmt.Printf("       docker compose -f %s ps\n", composeFile)
+	fmt.Printf("       docker compose -f %s logs -f\n", composeFile)
+	fmt.Println()
+
+	fmt.Println(">>> Docker Requirements:")
+	fmt.Println("    - Docker host networking support")
+	fmt.Println("    - Privileged container mode for VRRP raw socket and VIP management")
+	fmt.Println("    - Ensure multicast traffic (224.0.0.18) is allowed on the host network")
 	fmt.Println()
 }
